@@ -9,7 +9,7 @@ Created on Thu Nov 16 14:19:17 2017
 import tensorflow as tf
 
 def inference(inputs, eva = False):
-    outsize=[100,100,100,2]
+    outsize=[100,200,100,2]
     D = inputs.shape[1]
     
     with tf.variable_scope('hidden1') as scope:
@@ -33,8 +33,8 @@ def inference(inputs, eva = False):
     with tf.variable_scope('hidden3') as scope:
         if eva:
             scope.reuse_variables()
-        W3 = tf.get_variable('affine3',shape=[outsize[0],outsize[1]], initializer = tf.truncated_normal_initializer(stddev=0.1))
-        b3 = tf.get_variable('bias3',shape=[outsize[1]], initializer = tf.constant_initializer(0.0))
+        W3 = tf.get_variable('affine3',shape=[outsize[1],outsize[2]], initializer = tf.truncated_normal_initializer(stddev=0.1))
+        b3 = tf.get_variable('bias3',shape=[outsize[2]], initializer = tf.constant_initializer(0.0))
        
         hidden3 = tf.nn.relu(tf.matmul(hidden2,W3)+b3)
         reg_loss3 = tf.nn.l2_loss(W3)
@@ -42,8 +42,8 @@ def inference(inputs, eva = False):
     with tf.variable_scope('hidden4') as scope:
         if eva:
             scope.reuse_variables()
-        W4 = tf.get_variable('affine4',shape=[outsize[0],outsize[1]], initializer = tf.truncated_normal_initializer(stddev=0.1))
-        b4 = tf.get_variable('bias4',shape=[outsize[1]], initializer = tf.constant_initializer(0.0))
+        W4 = tf.get_variable('affine4',shape=[outsize[2],outsize[3]], initializer = tf.truncated_normal_initializer(stddev=0.1))
+        b4 = tf.get_variable('bias4',shape=[outsize[3]], initializer = tf.constant_initializer(0.0))
        
         logits = tf.nn.softmax(tf.matmul(hidden3,W4)+b4)
         reg_loss4 = tf.nn.l2_loss(W4)
