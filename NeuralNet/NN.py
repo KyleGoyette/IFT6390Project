@@ -63,12 +63,13 @@ def loss(logits,labels, reg=0, l2_loss = 0):
     loss += l2_loss
     #loss += l2_loss
     tf.summary.scalar('loss',loss)
+    #tf.summary.scalar('l2Loss',l2_loss)
     return loss
 
 def training(loss, learning_rate,global_step):
 
     optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-    
+    #tf.summary.scalar('learning_rate',learning_rate)
     train_op = optimizer.minimize(loss,global_step=global_step)
     return train_op
 

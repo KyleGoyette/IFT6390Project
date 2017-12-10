@@ -15,7 +15,8 @@ NUMEPOCHS = 1000
 BATCHSIZE = 500
 initial_learning_rate = 0.00001
 
-filename="../balanced_creditcard_train.csv"
+filename_train="../balanced_creditcard_train.csv"
+filename_val="../balanced_creditcard_val.csv"
 
 types = collections.OrderedDict([
         ("Time", type((0))),
@@ -53,24 +54,39 @@ types = collections.OrderedDict([
 
 def load_data(paths,y_name = 'Class',seed=None):
     train_path = paths[0]
+    val_path = val_features = val_labels = None
+    test_path = test_features = test_labels = None
     if len(paths)>1:
         val_path = paths[1]
     if len(paths)>2:
         test_path = paths[2]
-    
     train_data = pd.read_csv(train_path, names = types.keys(), dtype=types,
                        header=0)
     train_data = train_data.values
-    
     n = train_data.shape[0]
-    
     train_features=train_data[:,:-1]
-    
     train_labels = train_data[:,-1].astype(np.int)
 
 
+    if (type(val_path)!=type(None)):
+        val_data = pd.read_csv(val_path, names = types.keys(), dtype=types,
+                       header=0)
+        val_data = val_data.values
+        n = val_data.shape[0]
+        val_features = val_data[:,:-1]
+        val_labels = val_data[:,-1].astype(np.int)
 
-    return (train_features, train_labels)
+    if (type(test_path)!=type(None)):
+        test_data = pd.read_csv(test_path, names = types.keys(), dtype=types,
+                       header=0)
+        test_data = test_data.values
+        n = test_data.shape[0]
+        test_features = val_data[:,:-1]
+        test_labels = val_data[:,-1].astype(np.int)
+    print train_labels.shape
+    print val_labels.shape
+
+    return (train_features, train_labels), (val_features,val_labels), (test_features,test_labels)
 
 
     
@@ -87,7 +103,8 @@ def calc_ratio(labels):
 
 def run_training():
     
-    (features, labels)= load_data([filename])
+    (features, labels),(val_features,val_labels),(test_features,test_labels)= load_data([filename_train,filename_val])
+    k = val_features.shape[0]
     n = features.shape[0]/BATCHSIZE
     ratio = calc_ratio(labels)
     print ratio
@@ -100,18 +117,21 @@ def run_training():
         learning_rate = tf.train.exponential_decay(initial_learning_rate, global_step,
                                            NUMEPOCHS*n, 0.99, staircase=True)
         features_placeholder, labels_placeholder = placeholder_inputs(BATCHSIZE)
-        
+        val_features_placeholder = tf.placeholder(tf.float32,shape=(k,30))
+        val_labels_placeholder = tf.placeholder(tf.float32,shape=(k))
         class_weight = tf.constant([ratio, 1.0-ratio])
 
         logits, reg_loss = NN.inference(features_placeholder)
         #onehotlabs = tf.one_hot(labels_placeholder,depth=2)
-       #tf.one_hot())
+        #tf.one_hot())
         #class_weights = tf.matmul(onehotlabs,tf.reshape(class_weight,[2,1]))
         #print class_weights
         #class_weights = tf.multiply(tf.cast(tf.reshape(labels_placeholder,[BATCHSIZE,1]),dtype=tf.float32),tf.reshape(class_weight,[1,2]))
         #tf.multiply(tf.cast(tf.reshape(labels_placeholder,[BATCHSIZE,1]),dtype=tf.float32),tf.reshape(class_weight,[1,2]))
         loss = NN.loss(logits,labels_placeholder,reg=0.0000001,l2_loss=reg_loss)
-        
+        if (type(val_features) != type(None)):
+            val_preds,_ = NN.inference(val_features_placeholder,eva=True)
+            val_metrics_op = NN.metrics_eval(val_preds,val_labels_placeholder)
         
         increment_global_step_op = tf.assign(global_step, global_step+1)
         train_op = NN.training(loss,learning_rate,global_step)
@@ -124,7 +144,7 @@ def run_training():
         predictions_op = tf.argmax(logits,1)
         init = tf.global_variables_initializer()
         
-        saver = tf.train.Saver()
+        #saver = tf.train.Saver()
         
         sess = tf.Session()
 
@@ -135,39 +155,57 @@ def run_training():
         for epoch in range(1,NUMEPOCHS+1):
             num_correct_epoch = 0
             loss_average = 0
-            false_positives_sum = 0
-            false_negatives_sum = 0
-            true_positives_sum = 0
-            true_negatives_sum = 0
+            loss_history = [0]*NUMEPOCHS
+            false_positives_sum = [0]*NUMEPOCHS
+            false_negatives_sum = [0]*NUMEPOCHS
+            true_positives_sum = [0]*NUMEPOCHS
+            true_negatives_sum = [0]*NUMEPOCHS
+            
+            tp_val = tn_val = fp_val = fn_val = [0]*NUMEPOCHS
+            
+            
             for step in range(0,n):
                 
                 batch_features = features[(step*BATCHSIZE):(step+1)*BATCHSIZE,:]
                 batch_labels = labels[step*BATCHSIZE:(step+1)*BATCHSIZE]
 
-                #
+                
                 feed_dict={features_placeholder:batch_features, labels_placeholder: batch_labels}
 
                 _,total_loss,correct, metrics, predictions = sess.run([train_op,loss,eval_correct,metrics_op, predictions_op],
                                                 feed_dict=feed_dict)
                 
-                
+
                 (true_positives, true_negatives, false_positives, false_negatives) = metrics
-                false_positives_sum += false_positives
-                false_negatives_sum += false_negatives
-                true_positives_sum += true_positives
-                true_negatives_sum += true_negatives
+                false_positives_sum[epoch] += false_positives
+                false_negatives_sum[epoch] += false_negatives
+                true_positives_sum[epoch] += true_positives
+                true_negatives_sum[epoch] += true_negatives
                 loss_average+=total_loss
                 num_correct_epoch += correct
+            summary = sess.run(summary_op,feed_dict=feed_dict)
+            summary_writer.add_summary(summary,epoch)
             loss_average /= float(n)
+            loss_history[epoch] = loss_average
+            val_feed_dict = {
+                    val_features_placeholder:val_features,
+                    val_labels_placeholder: val_labels
+                    }
+            val_metrics = sess.run([val_metrics_op],feed_dict=val_feed_dict)
+            
+            (tp_val[epoch],tn_val[epoch],fp_val[epoch],fn_val[epoch]) = val_metrics[0]
+            
             #recall = true_positives_sum/(true_positives_sum + false_negatives_sum)
             #precision = true_positives_sum/(true_positives_sum+false_positives_sum)
             #fscore = 2*(precision*recall)/(precision+recall)
             accuracy_history[epoch-1] = num_correct_epoch/float(step*BATCHSIZE)
-            print "Epoch: " + repr(epoch)+" Loss: " + repr(loss_average) +" Accuracy: " + repr(accuracy_history[epoch-1])
+            print "Epoch: " + repr(epoch)+" Loss: " + repr(loss_history[epoch]) +" Accuracy: " + repr(accuracy_history[epoch-1])
             #" Fscore: " + repr(fscore)
-            print "False negatives: " + repr(false_negatives_sum)
-            print "True negatives:" + repr(true_negatives_sum)
-            print "False Positives: " + repr(false_positives_sum)
-            print "True Positives: " + repr(true_positives_sum)
-            sess.run(increment_global_step_op) 
+            print "False negatives: " + repr(false_negatives_sum[epoch])
+            print "True negatives:" + repr(true_negatives_sum[epoch])
+            print "False Positives: " + repr(false_positives_sum[epoch])
+            print "True Positives: " + repr(true_positives_sum[epoch])
+            
+            sess.run(increment_global_step_op)
+            
 run_training()
