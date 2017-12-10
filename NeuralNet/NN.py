@@ -9,13 +9,13 @@ Created on Thu Nov 16 14:19:17 2017
 import tensorflow as tf
 
 def inference(inputs, eva = False):
-    outsize=[100,200,100,2]
+    outsize=[200,300,200,2]
     D = inputs.shape[1]
     
     with tf.variable_scope('hidden1') as scope:
         if eva:
             scope.reuse_variables()
-        W1 = tf.get_variable('affine1',shape=[D,outsize[0]], initializer = tf.truncated_normal_initializer(stddev=0.3))
+        W1 = tf.get_variable('affine1',shape=[D,outsize[0]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
         b1 = tf.get_variable('bias1',shape=[outsize[0]], initializer = tf.constant_initializer(0.0))
         
         hidden1 = tf.nn.relu(tf.matmul(inputs,W1) +b1)
@@ -24,7 +24,7 @@ def inference(inputs, eva = False):
     with tf.variable_scope('hidden2') as scope:
         if eva:
             scope.reuse_variables()
-        W2 = tf.get_variable('affine2',shape=[outsize[0],outsize[1]], initializer = tf.truncated_normal_initializer(stddev=0.1))
+        W2 = tf.get_variable('affine2',shape=[outsize[0],outsize[1]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
         b2 = tf.get_variable('bias2',shape=[outsize[1]], initializer = tf.constant_initializer(0.0))
        
         hidden2 = tf.nn.relu(tf.matmul(hidden1,W2)+b2)
@@ -33,7 +33,7 @@ def inference(inputs, eva = False):
     with tf.variable_scope('hidden3') as scope:
         if eva:
             scope.reuse_variables()
-        W3 = tf.get_variable('affine3',shape=[outsize[1],outsize[2]], initializer = tf.truncated_normal_initializer(stddev=0.1))
+        W3 = tf.get_variable('affine3',shape=[outsize[1],outsize[2]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
         b3 = tf.get_variable('bias3',shape=[outsize[2]], initializer = tf.constant_initializer(0.0))
        
         hidden3 = tf.nn.relu(tf.matmul(hidden2,W3)+b3)
@@ -42,10 +42,10 @@ def inference(inputs, eva = False):
     with tf.variable_scope('hidden4') as scope:
         if eva:
             scope.reuse_variables()
-        W4 = tf.get_variable('affine4',shape=[outsize[2],outsize[3]], initializer = tf.truncated_normal_initializer(stddev=0.1))
+        W4 = tf.get_variable('affine4',shape=[outsize[2],outsize[3]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
         b4 = tf.get_variable('bias4',shape=[outsize[3]], initializer = tf.constant_initializer(0.0))
        
-        logits = tf.nn.softmax(tf.matmul(hidden3,W4)+b4)
+        logits = (tf.matmul(hidden3,W4)+b4)
         reg_loss4 = tf.nn.l2_loss(W4)
         
         
@@ -54,25 +54,56 @@ def inference(inputs, eva = False):
 
 def loss(logits,labels, reg=0, l2_loss = 0):
     labels = tf.to_int64(labels)
+    #weighted_logits = tf.multiply(logits,class_weights)
+    #softmax_logits = tf.nn.softmax(logits,name='Softmax')
     cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels,logits=logits,name="CrossEntropy")
+
+    #scaled_cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels,softmax_logits,weights=class_weights)
     loss = tf.reduce_mean(cross_entropy,name="CrossEntropy_mean")
     loss += l2_loss
-    #('loss',loss)
+    #loss += l2_loss
+    tf.summary.scalar('loss',loss)
     return loss
 
-def training(loss, learning_rate):
-    
-    #tf.summary.scalar('loss',loss)
-    
+def training(loss, learning_rate,global_step):
+
     optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-    global_step = tf.Variable(0,name='global_step',trainable=False)
     
     train_op = optimizer.minimize(loss,global_step=global_step)
     return train_op
 
 def evaluation(logits, labels):
+    
     correct = tf.nn.in_top_k(logits,labels,1)
     return tf.reduce_sum(tf.cast(correct,tf.int32))
 
-
-
+def metrics_eval(logits,labels):
+    predictions = tf.argmax(logits,1)
+    zeros_like_labels = tf.zeros_like(labels)
+    zeros_like_predictions = tf.zeros_like(predictions)
+    ones_like_labels = tf.ones_like(labels)
+    ones_like_predictions = tf.ones_like(predictions)
+    
+    true_positives_op = tf.reduce_sum(tf.cast(tf.logical_and(
+            tf.equal(labels,ones_like_labels),
+            tf.equal(predictions,ones_like_predictions)
+            ), "float"))
+    
+    true_negatives_op = tf.reduce_sum(tf.cast(tf.logical_and(
+            tf.equal(labels, zeros_like_labels),
+            tf.equal(predictions,zeros_like_predictions)
+            ),"float"))
+    
+    false_positives_op = tf.reduce_sum(tf.cast(tf.logical_and(
+            tf.equal(labels,zeros_like_labels),
+            tf.equal(predictions, ones_like_predictions)
+            ), "float"))
+    
+    false_negatives_op = tf.reduce_sum(tf.cast(tf.logical_and(
+            tf.equal(labels,ones_like_labels),
+            tf.equal(predictions,zeros_like_predictions)
+            ), "float"))
+    
+    return (true_positives_op,true_negatives_op,false_positives_op,false_negatives_op)
+    
+    
