@@ -9,7 +9,7 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 import collections
-import NN
+
 from sklearn.model_selection import train_test_split
 #hyperparams
 
@@ -76,9 +76,8 @@ class DefaultNN:
             self.mean[feature] = train_features[feature].mean()
             self.std[feature] = train_features[feature].std()
             train_features.loc[:,feature] = (train_features[feature]-self.mean[feature])/self.std[feature]
-        
+            
         train_features = train_features.values
-        
         train_labels = train_data['default.payment.next.month'].astype(np.int)
         train_labels = train_labels.values
         
@@ -87,14 +86,22 @@ class DefaultNN:
         else:
             val_data = pd.read_csv(val_path, names = self.types.keys(), dtype=self.types,
                            header=0)
+            val_feats = val_data[['AGE','LIMIT_BAL','PAY_0','PAY_2','PAY_3','PAY_4','PAY_5',
+                          'PAY_6','BILL_AMT1','BILL_AMT2','BILL_AMT3','BILL_AMT4',
+                          'BILL_AMT5','BILL_AMT6','PAY_AMT1','PAY_AMT2','PAY_AMT3',
+                          'PAY_AMT4','PAY_AMT5','PAY_AMT6']]
+            
+            onehot_val_features = pd.get_dummies(val_data[['SEX','MARRIAGE','EDUCATION']],
+                                         columns=['SEX','MARRIAGE','EDUCATION'])
+            val_features = [val_feats,onehot_val_features]
+            val_features = pd.concat(val_features,axis=1)
             for feature in features:
                 val_data.loc[:,feature] = (val_data[feature]-self.mean[feature])/self.std[feature]
-                
-            val_data = val_data.values
-            val_features = val_data[:,:-1]
-            val_labels = val_data[:,-1].astype(np.int)
-
-    
+            
+            val_features = val_features.values
+            val_labels = val_data['default.payment.next.month'].astype(np.int)
+            val_labels = val_labels.values
+            
         return (train_features, train_labels), (val_features,val_labels)
     
     def placeholder_inputs(self,batchsize):
@@ -118,29 +125,31 @@ class DefaultNN:
     def inference(self,inputs, test = False):
         outsize= self.hidden_dims
         D = inputs.shape[1]
-        W=[0]*len(self.hidden_dims)
-        b=[0]*len(self.hidden_dims)
+        self.W=[0]*len(self.hidden_dims)
+        self.b=[0]*len(self.hidden_dims)
         hidden=[0]*len(self.hidden_dims)
+
         for i in range(len(self.hidden_dims)):
             with tf.variable_scope('activation'+repr(i+1)) as scope:
                 if test:
                     scope.reuse_variables()
                 if (i==0):
-                    W[i] = tf.get_variable('affine'+repr(i+1),shape=[D,outsize[i]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
-                    b[i] = tf.get_variable('bias'+repr(i+1),shape=[outsize[i]], initializer = tf.constant_initializer(0.0))
+                    self.W[i] = tf.get_variable('affine'+repr(i+1),shape=[D,outsize[i]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
+                    self.b[i] = tf.get_variable('bias'+repr(i+1),shape=[outsize[i]], initializer = tf.constant_initializer(0.0))
                         #hidden = tf.nn.relu(tf.matmul(inputs,W[i])+b[i])
-                    hidden = tf.matmul(inputs,W[i],name='weightmul1')
-                    hidden = tf.add(hidden,b[i],name='addbias1')
+                    hidden = tf.matmul(inputs,self.W[i],name='weightmul1')
+                    hidden = tf.add(hidden,self.b[i],name='addbias1')
                         
                         
-                        
-                else:
-                    W[i] = tf.get_variable('affine'+repr(i+1),shape=[outsize[i-1],outsize[i]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
-                    b[i] = tf.get_variable('bias'+repr(i+1),shape=[outsize[i]], initializer = tf.constant_initializer(0.0))
-                    hidden = tf.matmul(hidden,W[i],name="WeightMul"+repr(i+1))+b[i]
 
-            tf.summary.histogram('weights'+repr(i+1),W[i])
-            tf.summary.histogram('biases'+repr(i+1),b[i])
+                else:
+                    self.W[i] = tf.get_variable('affine'+repr(i+1),shape=[outsize[i-1],outsize[i]], initializer = tf.contrib.layers.xavier_initializer(uniform=True, seed=None, dtype=tf.float32))
+                    self.b[i] = tf.get_variable('bias'+repr(i+1),shape=[outsize[i]], initializer = tf.constant_initializer(0.0))
+                    hidden = tf.matmul(hidden,self.W[i],name="WeightMul"+repr(i+1))+self.b[i]
+
+
+            tf.summary.histogram('weights'+repr(i+1),self.W[i])
+            tf.summary.histogram('biases'+repr(i+1),self.b[i])
         
         
         
@@ -153,8 +162,8 @@ class DefaultNN:
 
         logits = hidden
         
-        #reg_loss = reg_loss1+reg_loss2+reg_loss3+reg_loss4+reg_loss5+reg_loss6
-        return logits#,reg_loss
+
+        return logits
 
     def loss(self,logits,labels,batchsize):
     
@@ -165,7 +174,10 @@ class DefaultNN:
         
         #scaled_cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels,softmax_logits,weights=class_weights)
         loss = tf.reduce_mean(cross_entropy,name="CrossEntropy_mean")
-        #loss += reg*l2_loss
+        l2loss=0
+        for i in range(0,len(self.hidden_dims)):
+            l2loss+= self.reg*tf.nn.l2_loss(self.W[i])
+        loss+=l2loss
         #loss += l2_loss
         tf.summary.scalar('loss',loss)
         #tf.summary.scalar('l2Loss',l2_loss)
@@ -179,7 +191,7 @@ class DefaultNN:
         return train_op
     
     
-    def metrics_eval_sigmoid(self,logits,labels,batchsize):
+    def metrics_eval_sigmoid(self,logits,labels,batchsize,val=False):
         #sigmoid preds
         predictions = tf.cast(tf.round(logits),dtype=tf.int32)
         labels = tf.reshape(labels,shape=(batchsize,1))
@@ -212,10 +224,11 @@ class DefaultNN:
     
     def train(self,initial_learning_rate,num_epochs,batchsize,reg,savepath):
         
-        (features, labels),(val_features,val_labels) = self.load_train_data()
-        self.num_examples = features.shape[0]
+        (train_features, train_labels),(val_features,val_labels) = self.load_train_data()
+        self.num_examples = train_features.shape[0]
+        self.reg=reg
         n = self.num_examples/batchsize
-        ratio = calc_ratio(labels)
+        ratio = calc_ratio(train_labels)
         print ratio
         
         
@@ -225,32 +238,38 @@ class DefaultNN:
             global_step = tf.Variable(0,trainable=False)
             learning_rate = tf.train.exponential_decay(initial_learning_rate, global_step,
                                                10*self.num_examples/batchsize, 0.96, staircase=True)
-            features_placeholder, labels_placeholder = placeholder_inputs(batchsize)
-            if (type(val_features) != type(None)):
-                self.valsize = val_features.shape[0]
-                val_features_placeholder = tf.placeholder(tf.float32,shape=(self.valsize,30))
-                val_labels_placeholder = tf.placeholder(tf.float32,shape=(self.valsize))
-            #class_weight = tf.constant([1.0-ratio, ratio])
+            features_placeholder, labels_placeholder = self.placeholder_inputs(batchsize)
+
             logits = self.inference(features_placeholder)
+            #class_weight = tf.constant([1.0-ratio, ratio])
             #weighted_logits = tf.multiply(logits,class_weight)
-            loss = NN.loss(logits,labels_placeholder,batchsize)
-            train_op = NN.training(loss,learning_rate,global_step)
+            loss = self.loss(logits,labels_placeholder,batchsize)
+            train_op = self.training(loss,learning_rate,global_step)
             
             #auc calc
             reset_op = tf.local_variables_initializer()
-            auc_features_placeholder = tf.placeholder(tf.float32,shape=(self.num_examples,33))
-            auc_labels_placeholder = tf.placeholder(tf.int32,shape=(self.num_examples))
-            auc_logits = NN.inference(auc_features_placeholder,test=True)
+            auc_features_placeholder = tf.placeholder(tf.float32,shape=(self.num_examples,33),name="AUCFeatsPlaceholder")
+            auc_labels_placeholder = tf.placeholder(tf.int32,shape=(self.num_examples),name="AUCLabelsPlaceholder")
+            auc_logits = self.inference(auc_features_placeholder,test=True)
             probs = tf.sigmoid(auc_logits)
-            metrics_op=NN.metrics_eval_sigmoid(probs,auc_labels_placeholder,self.num_examples)
+            metrics_op=self.metrics_eval_sigmoid(probs,auc_labels_placeholder,self.num_examples)
             
             auc_op,update_op = tf.metrics.auc(labels=auc_labels_placeholder,predictions=probs,curve='PR')
-            tf.summary.scalar("AUC",auc_op)
+            tf.summary.scalar("TrainAUC",auc_op)
             
             if (type(val_features) != type(None)):
-                val_preds = NN.inference(val_features_placeholder,eva=True)
-                val_metrics_op = NN.metrics_eval(val_preds,val_labels_placeholder)
-            
+                reset_op_val = tf.local_variables_initializer()
+                self.valsize = val_features.shape[0]
+                print self.valsize
+                val_features_placeholder = tf.placeholder(tf.float32,shape=(self.valsize,33),name="ValFeatsPlaceholder")
+                val_labels_placeholder = tf.placeholder(tf.int32,shape=(self.valsize),name="ValLabelsPlaceholder")
+                
+                val_preds = self.inference(val_features_placeholder,test=True)
+                val_probs = tf.sigmoid(val_preds)
+                val_metrics_op = self.metrics_eval_sigmoid(val_probs,val_labels_placeholder,self.valsize)
+                
+                auc_val_op,val_update_op = tf.metrics.auc(labels=val_labels_placeholder,predictions=val_probs,curve='PR')
+                tf.summary.scalar("ValAUC",auc_val_op)
             increment_global_step_op = tf.assign(global_step, global_step+1)
             tf.summary.scalar('learningrate',learning_rate)
     
@@ -291,19 +310,20 @@ class DefaultNN:
                     batch_lower_bound = (step*batchsize)%self.num_examples
                     batch_upper_bound = ((step+1)*batchsize)%self.num_examples
     
-                    batch_features = features[batch_lower_bound:batch_upper_bound,:]
-                    batch_labels = labels[batch_lower_bound:batch_upper_bound]
+                    batch_features = train_features[batch_lower_bound:batch_upper_bound,:]
+                    batch_labels = train_labels[batch_lower_bound:batch_upper_bound]
     
                     feed_dict={features_placeholder:batch_features, labels_placeholder: batch_labels}
     
                     _,batch_loss,  predictions = sess.run([train_op,loss, predictions_op],
                                                     feed_dict=feed_dict)
                     loss_average+=batch_loss
-                
+                summary = sess.run(summary_op,feed_dict=feed_dict)
+                summary_writer.add_summary(summary,epoch)
                 #Epoch Checks - Calculate AUC-PR for train data
                 auc_feed_dict={
-                        auc_features_placeholder: features[:,:],
-                        auc_labels_placeholder: labels[:]
+                        auc_features_placeholder: train_features,
+                        auc_labels_placeholder: train_labels
                         }
                 sess.run([reset_op])
                 _,auc,logitsy,probsy,metrics = sess.run([auc_op,update_op,auc_logits,probs,metrics_op],feed_dict=auc_feed_dict)
@@ -311,45 +331,53 @@ class DefaultNN:
                 (true_positives[epoch], true_negatives[epoch],
                  false_positives[epoch], false_negatives[epoch]) = metrics
                 #update tensorboard
-                summary = sess.run(summary_op,feed_dict=feed_dict)
-                summary_writer.add_summary(summary,epoch)
+                
                 #save epoch loss to loss history
                 loss_history[epoch] = loss_average
                 if (type(val_features) != type(None)):
+                    print val_features.shape
                     val_feed_dict = {
-                        val_features_placeholder:val_features,
+                        val_features_placeholder: val_features,
                         val_labels_placeholder: val_labels
                     }
-                    sess.run([reset_op])
-                    val_auc, val_metrics = sess.run([update_op,metrics_op],feed_dict=val_feed_dict)
-                    tp_valy,tn_valy,fp_valy,fn_valy = val_metrics
+                    sess.run([reset_op_val])
+                    _,val_auc, val_metrics,vprobs = sess.run([auc_val_op,val_update_op,val_metrics_op,val_probs],feed_dict=val_feed_dict)
+                    print vprobs.shape
+                    (tp_valy,tn_valy,fp_valy,fn_valy) = val_metrics
+                    print tp_valy+tn_valy+fn_valy+fp_valy
                     tp_val[epoch] = tp_valy
                     tn_val[epoch] = tn_valy
                     fp_val[epoch] = fp_valy
                     fn_val[epoch] = fn_valy
                 #val_acc = (tp_valy+tn_valy)/float(tp_valy+fp_valy+tn_valy+fn_valy)
-                print "Epoch: " + repr(epoch+1)+" Loss: " + repr(loss_history[epoch]) +" AUC: " + repr(auc_history[epoch])# + ", Val acc: " + repr(val_acc)
-                #" Fscore: " + repr(fscore)
+                print "Epoch: " + repr(epoch+1)+" Loss: " + repr(loss_history[epoch]) +" Train AUC: " + repr(auc_history[epoch]) + " Val AUC: " +repr(val_auc)
+                print "Train Set:"
                 print "False negatives: " + repr(false_negatives[epoch])
                 print "True negatives: " + repr(true_negatives[epoch])
                 print "False Positives: " + repr(false_positives[epoch])
                 print "True Positives: " + repr(true_positives[epoch])
+                print "Val Set:"
+                print "False negatives: " + repr(fp_val[epoch])
+                print "True negatives: " + repr(tn_val[epoch])
+                print "False Positives: " + repr(fn_val[epoch])
+                print "True Positives: " + repr(tp_val[epoch])
                 sess.run(increment_global_step_op)
             #save_to_log("../Curves4.csv",true_positives_sum,false_positives_sum,true_negatives_sum,false_negatives_sum, tp_val,fp_val,tn_val,fn_val,loss_history)
-            save_net_path = saver.save(sess,savepath)#"../Net_saves/model.ckpt")
+            save_net_path = saver.save(sess,savepath)
     #(features, labels),(val_features,val_labels),(test_features,test_labels)= load_data([filename_train])
     
 dims=[128,3*128,3*3*128,3*3*128,3*3*3*128,1]
 NUMEPOCHS = 10000
 BATCHSIZE = 1000
 initial_learning_rate = 0.001
-num_epochs=10
+num_epochs=100
 batchsize=1000
-reg=0
+reg=0.00001
 savepath='/home/kyle/Documents/IFT6390/Project/IFT6390Project/Net_saves/Default/boo'
 REGU=0.0000000
 SUMMARYDIR = '../Default/logs/'
 filename_train="../CreditCardDefault_Train.csv"
+filename_val = "../CreditCardDefault_Val.csv"
 #hidden_dims,summary_path,trainpath,valpath=None,batchNorm=False
-NN = DefaultNN(dims,SUMMARYDIR,filename_train)
+NN = DefaultNN(dims,SUMMARYDIR,filename_train,filename_val)
 NN.train(initial_learning_rate,num_epochs,batchsize,reg,savepath)
