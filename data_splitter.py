@@ -21,7 +21,7 @@ np.random.shuffle(data)
 n = data.shape[0]
 train_split = int(0.6*n)
 train_val = int(0.8*n)
-
+print np.sum(data[:,-1])
 
 train_data = data[:train_split,:]
 validation_data = data[train_split:train_val,:]
