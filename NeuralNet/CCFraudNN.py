@@ -9,43 +9,49 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 import collections
-import json
-from sklearn.model_selection import train_test_split
 import os
+#from imblearn import under_sampling, over_sampling
+#from imblearn.over_sampling import SMOTE
 #hyperparams
 
 
-class DefaultNN:
-    #Default training classs for the RNN
+class FraudNN:
+    #Fraud Training Class
     
-    def __init__(self,hidden_dims,summary_path,trainpath,logdir,valpath=None,batchNorm=False):
+    def __init__(self,hidden_dims,summary_path,trainpath,logdir,valpath=None,batchNorm=True):
         self.types=collections.OrderedDict([
-                ("ID",type((0.0))),
-                ("LIMIT_BAL",type((0.0))),
-                ("SEX",type((0.0))),
-                ("EDUCATION",type((0.0))),
-                ("MARRIAGE",type((0.0))),
-                ("AGE",type((0.0))),
-                ("PAY_0",type((0.0))),
-                ("PAY_2",type((0.0))),
-                ("PAY_3",type((0.0))),
-                ("PAY_4",type((0.0))),
-                ("PAY_5",type((0.0))),
-                ("PAY_6",type((0.0))),
-                ("BILL_AMT1",type((0.0))),
-                ("BILL_AMT2",type((0.0))),
-                ("BILL_AMT3",type((0.0))),
-                ("BILL_AMT4",type((0.0))),
-                ("BILL_AMT5",type((0.0))),
-                ("BILL_AMT6",type((0.0))),
-                ("PAY_AMT1",type((0.0))),
-                ("PAY_AMT2",type((0.0))),
-                ("PAY_AMT3",type((0.0))),
-                ("PAY_AMT4",type((0.0))),
-                ("PAY_AMT5",type((0.0))),
-                ("PAY_AMT6",type((0.0))),
-                ("default.payment.next.month",type((0))),
-                ])
+            ("Time", type((0))),
+            ("V1",type(0.0)),
+            ("V2",type(0.0)),
+            ("V3",type(0.0)),
+            ("V4",type(0.0)),
+            ("V5",type(0.0)),
+            ("V6",type(0.0)),
+            ("V7",type(0.0)),
+            ("V8",type(0.0)),
+            ("V9",type(0.0)),
+            ("V10",type(0.0)),
+            ("V11",type(0.0)),
+            ("V12",type(0.0)),
+            ("V13",type(0.0)),
+            ("V14",type(0.0)),
+            ("V15",type(0.0)),
+            ("V16",type(0.0)),
+            ("V17",type(0.0)),
+            ("V18",type(0.0)),
+            ("V19",type(0.0)),
+            ("V20",type(0.0)),
+            ("V21",type(0.0)),
+            ("V22",type(0.0)),
+            ("V23",type(0.0)),
+            ("V24",type(0.0)),
+            ("V25",type(0.0)),
+            ("V26",type(0.0)),
+            ("V27",type(0.0)),
+            ("V28",type(0.0)),
+            ("Amount",type(0.0)),
+            ("Class",type(""))
+        ])
         self.hidden_dims=hidden_dims
         self.trainpath = trainpath
         self.summary_path = summary_path
@@ -60,54 +66,41 @@ class DefaultNN:
         
         train_data = pd.read_csv(train_path, names = self.types.keys(), dtype=self.types,
                                     header=1)
-        train_feats = train_data[['AGE','LIMIT_BAL','PAY_0','PAY_2','PAY_3','PAY_4','PAY_5',
-                          'PAY_6','BILL_AMT1','BILL_AMT2','BILL_AMT3','BILL_AMT4',
-                          'BILL_AMT5','BILL_AMT6','PAY_AMT1','PAY_AMT2','PAY_AMT3',
-                          'PAY_AMT4','PAY_AMT5','PAY_AMT6']]
+        train_features=train_data.values
+        np.random.shuffle(train_features)
+        self.mean_time = np.mean(train_features[:,1])
+        self.std_time = np.std(train_features[:,1])
+        train_features[:,1] = (train_features[:,1]-self.mean_time)/self.std_time
         
-        onehot_features = pd.get_dummies(train_data[['SEX','MARRIAGE','EDUCATION']],
-                                         columns=['SEX','MARRIAGE','EDUCATION'])
-        train_features = [train_feats,onehot_features]
-        train_features = pd.concat(train_features,axis=1)
+        self.mean_amount = np.mean(train_features[:,-2])
+        self.std_amount = np.std(train_features[:,-2])
+        train_features[:,-2] = (train_features[:,-2]-self.mean_amount)/self.std_amount
+        train_features = train_features[:,:-1]
         
-        features = train_feats.columns.values
-        
-        self.mean = {}
-        self.std = {}
-        for feature in features:
-            self.mean[feature] = train_features[feature].mean()
-            self.std[feature] = train_features[feature].std()
-            train_features.loc[:,feature] = (train_features[feature]-self.mean[feature])/self.std[feature]
-            
-        train_features = train_features.values
-        train_labels = train_data['default.payment.next.month'].astype(np.int)
-        train_labels = train_labels.values
+        train_labels = train_data.values
+        train_labels = train_labels[:,-1].astype(np.int)
+        print train_features.shape
         
         if (type(val_path)==type(None)):
             return (train_features, train_labels), (None,None)
         else:
             val_data = pd.read_csv(val_path, names = self.types.keys(), dtype=self.types,
                            header=0)
-            val_feats = val_data[['AGE','LIMIT_BAL','PAY_0','PAY_2','PAY_3','PAY_4','PAY_5',
-                          'PAY_6','BILL_AMT1','BILL_AMT2','BILL_AMT3','BILL_AMT4',
-                          'BILL_AMT5','BILL_AMT6','PAY_AMT1','PAY_AMT2','PAY_AMT3',
-                          'PAY_AMT4','PAY_AMT5','PAY_AMT6']]
             
-            onehot_val_features = pd.get_dummies(val_data[['SEX','MARRIAGE','EDUCATION']],
-                                         columns=['SEX','MARRIAGE','EDUCATION'])
-            val_features = [val_feats,onehot_val_features]
-            val_features = pd.concat(val_features,axis=1)
-            for feature in features:
-                val_data.loc[:,feature] = (val_data[feature]-self.mean[feature])/self.std[feature]
+            val_features = val_data.values
             
-            val_features = val_features.values
-            val_labels = val_data['default.payment.next.month'].astype(np.int)
-            val_labels = val_labels.values
+            val_features[:,1] = (val_features[:,1]-self.mean_time)/self.std_time
+            val_features[:,-2] = (val_features[:,-2]-self.mean_amount)/self.std_amount
+            
+            val_labels = val_features[:,-1].astype(np.int)
+            print "Sum of positives in val: " + repr(np.sum(val_labels))
+            val_features = val_features[:,:-1]
+            print val_features.shape
             
         return (train_features, train_labels), (val_features,val_labels)
     
     def placeholder_inputs(self,batchsize):
-        features_placeholder = tf.placeholder(tf.float32, shape=(batchsize,33))
+        features_placeholder = tf.placeholder(tf.float32, shape=(batchsize,30))
         labels_placeholder = tf.placeholder(tf.int32,shape=(batchsize),name="TrainLabels")
         return features_placeholder, labels_placeholder
     
@@ -175,12 +168,12 @@ class DefaultNN:
 
         return logits
 
-    def loss(self,logits,labels,batchsize):
+    def loss(self,logits,labels,batchsize,weights=1.0):
     
         #weighted_logits = tf.multiply(logits,class_weights)
         #softmax_logits = tf.nn.softmax(logits,name='Softmax')
         #cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels,logits=logits,name="CrossEntropy")
-        cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.cast(tf.reshape(labels,shape=(batchsize,1)),dtype=tf.float32),logits=logits,name='CrossEntropy')
+        cross_entropy = tf.losses.sigmoid_cross_entropy(tf.cast(tf.reshape(labels,shape=(batchsize,1)),dtype=tf.float32),weights=weights,logits=logits)
         
         #scaled_cross_entropy = tf.losses.sparse_softmax_cross_entropy(labels,softmax_logits,weights=class_weights)
         loss = tf.reduce_mean(cross_entropy,name="CrossEntropy_mean")
@@ -232,7 +225,7 @@ class DefaultNN:
         
         return (true_positives_op,true_negatives_op,false_positives_op,false_negatives_op)
     
-    def train(self,initial_learning_rate,num_epochs,batchsize,reg,savepath,weight_logits=False):
+    def train(self,initial_learning_rate,num_epochs,batchsize,reg,savepath,weight_logits=True):
         
         (train_features, train_labels),(val_features,val_labels) = self.load_train_data()
         self.num_examples = train_features.shape[0]
@@ -257,11 +250,10 @@ class DefaultNN:
             else:
                 loss = self.loss(logits,labels_placeholder,batchsize)
             train_op = self.training(loss,learning_rate,global_step)
-
             
             #auc calc
             reset_op = tf.local_variables_initializer()
-            auc_features_placeholder = tf.placeholder(tf.float32,shape=(self.num_examples,33),name="AUCFeatsPlaceholder")
+            auc_features_placeholder = tf.placeholder(tf.float32,shape=(self.num_examples,30),name="AUCFeatsPlaceholder")
             auc_labels_placeholder = tf.placeholder(tf.int32,shape=(self.num_examples),name="AUCLabelsPlaceholder")
             auc_logits = self.inference(auc_features_placeholder,test=True)
             probs = tf.sigmoid(auc_logits)
@@ -274,7 +266,7 @@ class DefaultNN:
                 reset_op_val = tf.local_variables_initializer()
                 self.valsize = val_features.shape[0]
                 print self.valsize
-                val_features_placeholder = tf.placeholder(tf.float32,shape=(self.valsize,33),name="ValFeatsPlaceholder")
+                val_features_placeholder = tf.placeholder(tf.float32,shape=(self.valsize,30),name="ValFeatsPlaceholder")
                 val_labels_placeholder = tf.placeholder(tf.int32,shape=(self.valsize),name="ValLabelsPlaceholder")
                 
                 val_preds = self.inference(val_features_placeholder,test=True)
@@ -361,16 +353,16 @@ class DefaultNN:
                 #save epoch loss to loss history
                 loss_history[epoch] = loss_average
                 if (type(val_features) != type(None)):
-                    print val_features.shape
+
                     val_feed_dict = {
                         val_features_placeholder: val_features,
                         val_labels_placeholder: val_labels
                     }
                     sess.run([reset_op_val])
                     _,val_auc[epoch], val_metrics,vprobs = sess.run([auc_val_op,val_update_op,val_metrics_op,val_probs],feed_dict=val_feed_dict)
-                    print vprobs.shape
+
                     (tp_valy,tn_valy,fp_valy,fn_valy) = val_metrics
-                    print tp_valy+tn_valy+fn_valy+fp_valy
+
                     tp_val[epoch] = tp_valy
                     tn_val[epoch] = tn_valy
                     fp_val[epoch] = fp_valy
@@ -379,7 +371,6 @@ class DefaultNN:
                     precision_val[epoch] = tp_valy/(float(tp_valy+fp_valy))
                     recall_val[epoch] = tp_valy/float(tp_valy+fn_valy)
                     fscore_val[epoch] = 2*precision_val[epoch]*recall_val[epoch]/float(precision_val[epoch]+recall_val[epoch])
-                
                 #val_acc = (tp_valy+tn_valy)/float(tp_valy+fp_valy+tn_valy+fn_valy)
                 print "Epoch: " + repr(epoch+1)+" Loss: " + repr(loss_history[epoch]) +" Train AUC: " + repr(auc_history[epoch]) + " Val AUC: " +repr(val_auc[epoch])
                 print "Train Set:"
@@ -407,42 +398,45 @@ class DefaultNN:
 
 
 hyperparams = {
-        'dims':[[30,60,120,200,500,1],[30,50,70,90,50,90,1]],
+        'dims':[[30,50,75,100,125,1],[40,60,90,135,200,1]],
         'learning_rate':[0.001,0.01],
-        'reg': [0.00001,0.000001,0.000001],
+        'reg': [0.0000001,0.0000003,0.000001],
         'batchNorm': True,
-        'weightclasses': [True,False]
+        'weight_classes': [True,False]
         }
 NUMEPOCHS = 10000
 BATCHSIZE = 1000
-initial_learning_rate = 0.01
 num_epochs=200
 batchsize=1000
-reg=0.00001
-SUMMARYDIR = '../Default/logs/'
-filename_train="../CreditCardDefault_Train.csv"
-filename_val = "../CreditCardDefault_Val.csv"
+reg=0.000001
+SUMMARYDIR = '../Fraud/logs/'
+filename_train="../CC_fraud_Train.csv"
+filename_val = "../CC_fraud_Val.csv"
 #hidden_dims,summary_path,trainpath,valpath=None,batchNorm=False
 NN_id = 0
 aucs={}
 best_val_auc=10000
+statsdir = '/home/kyle/Documents/IFT6390/Project/IFT6390Project/Fraud/'
+savepath = '/home/kyle/Documents/IFT6390/Project/IFT6390Project/Fraud/Net'
+#NN = FraudNN([80,100,150,200,1],SUMMARYDIR,filename_train,statsdir,filename_val)
+#NN.train(initial_learning_rate,num_epochs,BATCHSIZE,reg,savepath)
 for dim in hyperparams['dims']:
     for lr in hyperparams['learning_rate']:
         for regu in hyperparams['reg']:
-            for weight in hyperparams['weightclasses']:
+            for weight in hyperparams['weight_classes']:
                 NN_id += 1
-                logdir = '/home/kyle/Documents/IFT6390/Project/IFT6390Project/Default/'+ repr(NN_id)+'/'
+                logdir = '/home/kyle/Documents/IFT6390/Project/IFT6390Project/Fraud/'+ repr(NN_id)+'/'
                 statsdir = logdir + 'Curves/'
                 savepath = logdir+'Savednets'+repr(NN_id)
                 SummaryDir = logdir+ 'Summaries'
                 os.makedirs(logdir)
                 os.makedirs(statsdir)
-                NN = DefaultNN(dim,SummaryDir,filename_train,statsdir,filename_val,batchnorm=batchnorm)
-                val_auc = NN.train(lr,num_epochs,batchsize,regu,savepath,weight_logits=weight)
+                NN = FraudNN(dims,SummaryDir,filename_train,statsdir,filename_val)
+                val_auc = NN.train(learning_rate,num_epochs,batchsize,reg,savepath)
                 aucs[NN_id] = val_auc
                 if val_auc<best_val_auc:
                     bestID = NN_id
-fo = open("/home/kyle/Documents/IFT6390/Project/IFT6390Project/Default/Aucs.txt", "w")
+fo = open("/home/kyle/Documents/IFT6390/Project/IFT6390Project/Fraud/Aucs.txt", "w")
 for k, v in aucs.items():
     fo.write(str(k) + ' : '+ str(v) + '\n')
 fo.close()
